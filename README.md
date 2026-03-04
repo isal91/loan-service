@@ -1,6 +1,6 @@
 # RFC: Loan Service - System Design and Abstraction
 
-This document outlines the proposed design for the core Loan Engine, focusing on state management, validation rules, and the RESTful API interface.
+This document outlines the proposed design for the core Loan Engine, focusing on state management, validation rules, the RESTful API interface, and **robust concurrency handling** to safely manage simultaneous investments.
 
 ## 1. Overview
 The Loan Engine manages the lifecycle of a loan from its initial proposal through approval, investment, and final disbursement. All state transitions are forward-moving only.
@@ -10,6 +10,7 @@ The Loan Engine manages the lifecycle of a loan from its initial proposal throug
 - **Asynchronous Messaging**: Distributing agreement letters via a message queue (e.g., Kafka or RabbitMQ) is out of scope. A simple goroutine is used instead to avoid adding heavy infrastructure requirements to the reviewer's local setup.
 - **Repayment Processing**: The logic for borrower repayments is not covered in this RFC.
 - **Interest Distribution**: Automatic distribution of interest to investors during repayments is out of scope.
+- **Authentication & Authorization**: A secure Identity and Access Management (IAM) flow using JWTs or Sessions is not implemented. API parameters directly rely on User IDs for simplicity in this scope.
 
 ## 2. Database Schema
 
@@ -80,7 +81,6 @@ The Loan Engine manages the lifecycle of a loan from its initial proposal throug
 
 **Investment Status Logic:**
 - **`invested`**: The investment request was successful. Funds have been deducted, the loan's `total_invested` has been updated, and the transaction is committed atomically.
-- *(Note: Intermediate states like `process` or `paid` are reserved for future asynchronous/message-queue implementations. The synchronous backend does not store `failed` records to prevent database bloat. The Frontend is expected to handle analytic tracking (e.g., via MoEngage) by interpreting the specific `code` field returned in the HTTP response).*
 
 ### `pockets`
 Tracks separate balances for different sources of funds.
@@ -134,13 +134,11 @@ Loans move strictly forward: `proposed` -> `approved` -> `invested` -> `disburse
 ### 3.3. Invested
 - **Trigger**: Total investment amount reaches `principal_amount`.
 - **Requirement**:
-    - Sum of `Investment.amount` == `Loan.principal_amount`.
+    - The `total_invested` on the loan exactly matches the `principal_amount` (We maintain a pre-calculated `total_invested` column to avoid expensive aggregate queries on the investments table).
     - Cannot exceed `principal_amount`.
 - **Locking & Atomicity**:
     - **Pessimistic Locking**: Every investment request must perform a `SELECT FOR UPDATE` on both the **Loan** record (to prevent over-investment) and the **Investor's Pocket** (to guarantee balance integrity).
     - **Atomic Transaction**: The deduction from the pocket, the creation of the investment record, and the update of the loan's `total_invested` must occur within a single atomic database transaction.
-        1. **Sync**: Create investment record with status `paid` and return "success" to the user immediately after pocket deduction.
-        2. **Async**: Use a background worker (e.g., queue) to update `loan.total_invested` and change the investment status from `paid` to `invested`.
 - **Action**: Once reached, status becomes `invested` and an email is sent to all current investors containing the link to their `agreement_letter_url`.
 
 ### 3.4. Disbursed
@@ -163,7 +161,7 @@ The Loan Service follows a standard backend architecture focused on simplicity a
 - **API Gateway / Load Balancer**: Handles SSL termination and routes requests to the Go application.
 - **Investor & Borrower Apps**: Mobile or Web clients used by the public to manage loans and investments.
 - **Staff Tool**: Internal interface for employees to approve and disburse loans.
-- **Golang Service**: Core business logic, state machine, and transaction management.
+- **Golang Service**: Core business logic, state machine, and transaction management. **Golang was chosen** for its natively efficient concurrency model (Goroutines), which is essential for handling high-throughput P2P lending transactions without heavy OS thread overhead.
 - **PostgreSQL**: Clustered index on primary keys, supporting ACID transactions and row-level locking.
 
 ---
@@ -297,7 +295,7 @@ This strategy significantly reduces the time the `loan` record is locked, preven
 ### 8.1. Running Setup
 To reset the Postgres database and seed it with dummy users (borrowers & investors) and a dummy loan, run the following setup script:
 ```bash
-docker-compose down -v && chmod +x scripts/setup.sh && ./scripts/setup.sh
+chmod +x scripts/setup.sh && ./scripts/setup.sh
 ```
 
 ### 8.2. Swagger Interface
