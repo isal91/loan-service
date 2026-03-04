@@ -1,0 +1,293 @@
+openapi: 3.0.0
+info:
+  title: Loan Service API
+  description: API for managing loan lifecycle (Propose, Approve, Invest, Disburse).
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local Development Server
+
+tags:
+  - name: "1. Propose (Borrower)"
+  - name: "2. Approve (Admin)"
+  - name: "3. Invest (Investor)"
+  - name: "4. Disburse (Admin)"
+  - name: "5. Debug (Admin)"
+
+paths:
+  # 1. PROPOSE
+  /loans:
+    post:
+      summary: Propose a new loan
+      tags:
+        - "1. Propose (Borrower)"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                borrower_id:
+                  type: integer
+                  example: 1
+                description:
+                  type: string
+                  example: "Pinjaman Modal Usaha Bakso"
+                principal_amount:
+                  type: number
+                  example: 5000000
+                rate:
+                  type: number
+                  example: 0.1
+                roi:
+                  type: number
+                  example: 0.12
+      responses:
+        '201':
+          description: Loan proposed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+
+  # 2. APPROVE
+  /admin/loans/{loan_number}/approve:
+    post:
+      summary: Approve a proposed loan
+      tags:
+        - "2. Approve (Admin)"
+      parameters:
+        - name: loan_number
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "LN-DUMMY-001"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approved_by_employee_id:
+                  type: string
+                  example: "EMP-001"
+                visit_proof_url:
+                  type: string
+                  example: "http://example.com/proof.jpg"
+      responses:
+        '200':
+          description: Loan approved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+
+  # 3. INVEST
+  /loans/{loan_number}/invest:
+    post:
+      summary: Invest in an approved loan
+      tags:
+        - "3. Invest (Investor)"
+      parameters:
+        - name: loan_number
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "LN-DUMMY-001"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                investor_id:
+                  type: integer
+                  example: 2
+                amount:
+                  type: number
+                  example: 5000000
+                idempotent_key:
+                  type: string
+                  example: "idemp-001"
+      responses:
+        '200':
+          description: Investment successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+        '400':
+          description: Bad Request (e.g. insufficient_balance, amount_exceed, fully_funded, not_approved)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                insufficient_balance:
+                  summary: Insufficient Balance
+                  value:
+                    code: "insufficient_balance"
+                    message: "investor pocket balance is insufficient"
+                fully_funded:
+                  summary: Fully Funded
+                  value:
+                    code: "fully_funded"
+                    message: "loan is already fully invested"
+                amount_exceed:
+                  summary: Amount Exceed
+                  value:
+                    code: "amount_exceed"
+                    message: "investment amount exceeds remaining loan principal"
+                not_approved:
+                  summary: Not Approved
+                  value:
+                    code: "not_approved"
+                    message: "loan is not approved yet"
+        '409':
+          description: Conflict - Investment request already processed (code duplicate_request).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # 4. DISBURSE
+  /admin/loans/{loan_number}/disburse:
+    post:
+      summary: Disburse an invested loan
+      tags:
+        - "4. Disburse (Admin)"
+      parameters:
+        - name: loan_number
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "LN-DUMMY-001"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                disbursed_by_employee_id:
+                  type: string
+                  example: "EMP-002"
+                borrower_agreement_url:
+                  type: string
+                  example: "http://example.com/agreement.pdf"
+      responses:
+        '200':
+          description: Loan disbursed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+        '400':
+          description: Bad Request (e.g. loan not in 'invested' status)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                not_invested:
+                  summary: Not Invested
+                  value:
+                    code: "failed"
+                    message: "attempt to disburse non-invested loan"
+        '409':
+          description: Conflict - Loan has already been disbursed (code duplicate_request).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # 5. DEBUG
+  /admin/debug/loans:
+    get:
+      summary: "[DEBUG] List all loans"
+      tags:
+        - "5. Debug (Admin)"
+      responses:
+        '200':
+          description: List of loans
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+  /admin/debug/pockets:
+    get:
+      summary: "[DEBUG] List all user pockets"
+      tags:
+        - "5. Debug (Admin)"
+      responses:
+        '200':
+          description: List of pockets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+  /admin/debug/investments:
+    get:
+      summary: "[DEBUG] List all investments"
+      tags:
+        - "5. Debug (Admin)"
+      responses:
+        '200':
+          description: List of investments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+  /admin/debug/ledger:
+    get:
+      summary: "[DEBUG] List all ledger entries"
+      tags:
+        - "5. Debug (Admin)"
+      responses:
+        '200':
+          description: List of ledger entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+
+components:
+  schemas:
+    StandardResponse:
+      type: object
+      properties:
+        code:
+          type: string
+          enum: [success]
+          example: "success"
+        message:
+          type: string
+          example: "Operation successful"
+        data:
+          type: object
+          description: "Response data"
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: string
+          enum: [failed, insufficient_balance, fully_funded, duplicate_request, amount_exceed, not_approved]
+          example: "failed"
+          description: |
+            Specific error codes to help frontend analytics/routing:
+            - `failed`: Default/Unknown system error
+            - `insufficient_balance`: Investor pocket balance is less than the investment amount
+            - `fully_funded`: Loan is already fully invested
+            - `duplicate_request`: Idempotent key or action was already processed
+            - `amount_exceed`: Investment amount exceeds the remaining required principal
+            - `not_approved`: Loan is not in 'approved' status
+        message:
+          type: string
+          example: "Detailed error message"
